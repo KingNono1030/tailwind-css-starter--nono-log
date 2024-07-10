@@ -1,0 +1,211 @@
+---
+title: react - 컴파운드 컴포넌트
+date: '2024-07-09'
+tags: ['react 디자인 패턴', '리액트 컴포넌트 디자인', '개발 경험']
+draft: false
+summary: 컴파운드 컴포넌트 패턴은 여러 독립적인 하위 컴포넌트를 조합하여 복잡한 UI를 유연하고 유지보수하기 쉽게 만드는 React 디자인 패턴이다. 드롭다운과 selct option 같이 부모와 자식 컴포넌트가 동일한 상태를 공유할 때, 컴파운드 패턴을 따를 수 있다.
+---
+
+## 출처
+
+[canva developer resources - compound components](<https://canvas.workday.com/get-started/for-developers/resources/compound-components/#:~:text=Compound%20components%20is%20a%20pattern,Shared%20model%20(optional%2C%20advanced)>)
+[patterns.dev](https://www.patterns.dev/react/compound-pattern)
+
+## 학습 배경
+
+다음은 '오픈마인드' 프로젝트에서 내가 맡은 드롭다운 컴포넌트이다.
+
+```jsx
+// Dropdown.js
+export default function Dropdown({ options, handleOption }) {
+  const [isOpen, toggleDropdown] = useToggle(false)
+  const { selectedOption, selectOption } = useDropdown(options)
+
+  return (
+    <S.DropdownWrapper>
+      <S.DropdownButton $isOpen={isOpen} onClick={toggleDropdown} type="button">
+        {selectedOption.content}
+        {getCaret(isOpen)}
+      </S.DropdownButton>
+      {isOpen && (
+        <S.OptionList>
+          {options.map((option) => (
+            <S.Option
+              key={option.value}
+              onClick={() => {
+                selectOption(option)
+                handleOption(option.value)
+              }}
+              $isSelected={option.content === selectedOption.content}
+            >
+              {option.content}
+            </S.Option>
+          ))}
+        </S.OptionList>
+      )}
+    </S.DropdownWrapper>
+  )
+}
+```
+
+```js
+// useDropdown.js
+import { useState, useCallback } from 'react'
+
+export default function useDropdown(options) {
+  const [selectedOption, setSelectedOption] = useState(options[0])
+  const selectOption = useCallback((option) => {
+    setSelectedOption(option)
+  }, [])
+
+  return {
+    selectedOption,
+    selectOption,
+  }
+}
+```
+
+UI 와 디자인을 구분한다고, useDropdown 커스텀훅까지 만들었지만, Dropdown 컴포넌트는 여전히 지저분하다.
+
+```jsx
+// FeedSection.jsx
+<S.SectionContainer className={className}>
+  <Dropdown options={orderOptions} handleOption={handleOption} />
+  <FeedList feeds={feeds} />
+</S.SectionContainer>
+```
+
+사용되는 Dropdown 은 지나치게 생략되었다. 과연 options 프롭스만 넘겨주면 내가 원하는 드롭다운을 매번 재사용하는게 가능할까?
+
+**정답은 그렇지 않다**
+위는 대표적인 안티패턴으로, 하나의 컴포넌트가 너무 많은 일을 맡은 경우가 해당된다.
+
+### 기존 코드의 문제점
+
+- 복잡성 증가: 모든 상태와 로직을 한 컴포넌트에 모아두면, 컴포넌트가 복잡해 유지보수가 어렵다.
+- 재사용성 저하: 드롭다운 컴포넌트의 외부에서 이를 커스텀할 수 있는 것은 오직 options와 handleOption 뿐이다.
+- 테스트 어려움: 컴포넌트가 복잡하니, 개별 기능을 테스트하기 어렵다.
+- 성능 저하: 복잡한 컴포넌트는 쓸데없이 리렌더링이 일어날 가능성이 높다.
+  나는 위 문제점을 해결하기 위한 방안을 모색하던 중, 컴파운드 컴포넌트 디자인 패턴에 대해 알게 되었다.
+
+## 컴파운드 컴포넌트
+
+컴파운드 컴포넌트(Compound Component) 패턴은 여러 개의 독립적인 하위 컴포넌트들을 조합하여 UI를 구성하는 방식이다.
+드롭다운과 같이 부모 컴포넌트와 자식 컴포넌트가 같은 상태를 공유하고, 함께 동작하는 경우에 컴파운트 컴포넌트를 따르는 것이 매우 효과적이다.
+
+컴파운드 컴포넌트 패턴은 UI를 더욱 유연하게 구성할 수 있도록 하며, 각 하위 컴포넌트를 독립적으로 관리하면서도 상위 컴포넌트와 잘 연동되도록 할 수 있다.
+
+### 예시 : 드롭다운
+
+![|100](https://i.imgur.com/c9U2Z2i.png)
+드롭다운 컴포넌트를 분석하면
+
+> 1. 모두를 감싸는 컨테이너
+> 2. 드롭다운을 토글하는 버튼
+> 3. 토글 시 나타나는 메뉴
+> 4. 메뉴 안의 각 선택지
+
+이렇게 4가지로 구분할 수 있다.
+
+1. 컨테이너 컴포넌트
+
+```jsx
+// Dropdown
+const DropdownContext = createContext()
+
+const Dropdown = ({ children }) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const toggle = () => setIsOpen(!isOpen)
+
+  return (
+    <DropdownContext.Provider value={{ isOpen, toggle }}>
+      <div className="dropdown">{children}</div>
+    </DropdownContext.Provider>
+  )
+}
+```
+
+- 드롭다운은 컨텍스트로 감싸 isOpen 과 toggle 이라는 상태를 드롭다운과 하위 컴포넌트들이 동시에 사용할 수 있다.
+
+2. 토글 컴포넌트
+
+```jsx
+// Toggle
+const Toggle = ({ children }) => {
+  const { toggle } = useContext(DropdownContext)
+
+  return (
+    <button className="dropdown-toggle" onClick={toggle}>
+      {children}
+    </button>
+  )
+}
+```
+
+- 토글 컴포넌트는 toggle 이라는 동작을 받아, 클릭시에 isOpen 이라는 상태의 값을 변경할 수 있다.
+
+3. 메뉴 컴포넌트
+
+```jsx
+// Menu
+const Menu = ({ children }) => {
+  const { isOpen } = useContext(DropdownContext)
+
+  return isOpen ? <div className="dropdown-menu">{children}</div> : null
+}
+```
+
+- 메뉴 컴포넌트는 isOpen 에 따라 조건부로 렌더링 된다.
+
+4. 아이템 컴포넌트
+
+```jsx
+// Item
+const Item = ({ children, onClick }) => {
+  return (
+    <div className="dropdown-item" onClick={onClick}>
+      {children}
+    </div>
+  )
+}
+```
+
+```jsx
+// export
+Dropdown.Toggle = DropdownToggle
+Dropdown.Menu = DropdownMenu
+Dropdown.Item = DropdownItem
+
+export default Dropdown
+```
+
+- 어차피 하위 컴포넌트들은 Dropdown 이랑 한 세트이므로, 한 번에 import 받을 수 있게 Dropdown의 프로퍼티로 넘겨준다.
+
+5. 사용 예시
+
+```jsx
+// App.jsx
+<Dropdown>
+  <Dropdown.Toggle>드롭다운 버튼</Dropdown.Toggle>
+  <Dropdown.Menu>
+    <Dropdown.Item onClick={() => handleItemClick(1)}>옵션 1</Dropdown.Item>
+    <Dropdown.Item onClick={() => handleItemClick(2)}>옵션 2</Dropdown.Item>
+  </Dropdown.Menu>
+</Dropdown>
+```
+
+- 만든 드롭다운 컴포넌트는 위 처럼 조합하여 만든다.
+- 이렇게 될 경우, 우리는 Dropdown에 종속되어 있는 하위 컴포넌트들을 바깥에서 직접 커스터마이징 할 수 있어 디자인이 유연하다.
+
+### 장점
+
+- **유연성**: 하위 컴포넌트들을 원하는 대로 조합하여 상위 컴포넌트를 구성할 수 있다.
+- **재사용성**: 하위 컴포넌트들이 독립적이므로 다양한 조합으로 재사용할 수 있다.
+- **캡슐화**: 상위 컴포넌트는 하위 컴포넌트의 상태와 동작을 관리하고, 하위 컴포넌트는 자신의 역할에만 집중할 수 있다.
+- **가독성**: 컴포넌트의 역할이 명확하게 분리되어 있어 코드의 가독성이 향상된다.
+
+## 결론
+
+컴파운드 컴포넌트 패턴은 복잡한 UI를 더 유연하고 유지보수하기 쉽게 만들어준다. 이 패턴을 사용하면 각 구성 요소를 독립적으로 관리할 수 있어 코드의 가독성과 재사용성을 높일 수 있다. 특히, 다양한 상황에서 쉽게 확장 가능하고, 사용자 정의가 필요한 경우에 매우 유용하다.
+
+React로 개발하면서 컴포넌트의 복잡성이 증가할 때, 컴파운드 컴포넌트 패턴을 도입해보길 권해본다. 이를 통해 더 깨끗하고 관리하기 쉬운 코드를 작성할 수 있을 것이다. 또한, 팀 협업 시 컴포넌트의 역할이 명확해져 개발 효율성을 높일 수 있다.
