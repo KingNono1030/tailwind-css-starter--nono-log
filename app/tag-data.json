@@ -1,1 +1,10 @@
-{ "js": 1, "js_deep_dive": 1, "multi-author": 1, "next-js": 1, "feature": 1 }
+{
+  "js": 1,
+  "js_deep_dive": 1,
+  "multi-author": 1,
+  "next-js": 1,
+  "feature": 1,
+  "react-디자인-패턴": 1,
+  "리액트-컴포넌트-디자인": 1,
+  "개발-경험": 1
+}
