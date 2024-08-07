@@ -1,0 +1,128 @@
+---
+title: taskify project - 모달 컴포넌트
+date: '2024-08-07'
+tags: ['taskify 프로젝트', '개발 경험', '프로젝트 회고']
+draft: false
+summary: 모달 컴포넌트는 어떻게 만들면 좋을까
+---
+
+## 개요
+
+이번 프로젝트에서 나는 공통 컴포넌트인 모달을 맡았다. 프로젝트에서 쓰이는 모달의 종류는 내 기준에서 총 네가지로 분류되었다.
+
+- Confirm 모달: 잘못된 로그인 또는 회원가입 시, 나오는 에러 메시지를 전달하고 사용자에게 이를 확인을 받는 모달
+  - ![|300](https://i.imgur.com/d7mPXRd.png)
+  - 에러메시지
+  - 확인 버튼
+- Alert 모달: 사용자의 위험한 동작에 대해 한 번더 의사를 재 검정하는 모달
+  - ![|300](https://i.imgur.com/CffsrtW.png)
+  - 경고 메시지
+  - 취소 버튼
+  - 진행 버튼
+- Form 모달: 사용자에게 입력을 받고, post, put, delete 요청을 보내는 모달
+  - ![|300](https://i.imgur.com/RV7frAm.png)
+  - Input
+- TaskCard 모달: Column 내 Card에 대한 상세정보를 제공하는 모달
+  - ![|300](https://i.imgur.com/8ExujPd.png)
+
+모두 모달이라는 공통점을 가지고 있어도, 내부 스타일링적 면이나 기능 면에서 차이가 난다.
+이런 상황에서 나는 재사용성을 높이기 위해, 모달 컴포넌트를 여러번 만들지 않고 한 번 만든 모달 컴포넌트를 여러번 재사용할 수 있는 방법에 대해 생각해 보았다.
+
+### 컴파운드 패턴
+
+가장 먼저 생각난 것은 컴파운드 패턴이었다. 컴파운드 패턴은 Dropdown 이나 Form 같이, 여러 하위 컴포넌트를 감싸는 부모 컴포넌트가 자식들과 긴밀히 연결되어 있어 서로 뗄 수 없는 관계, 또는 이들이 동일한 상태를 공유해야 할 때 적용할 수 있는 패턴이다.
+
+```tsx
+const DropdownContext = createContext({ isOpen: false, toggle: () => {} })
+
+function Dropdown({ children, className }: DropdownProps) {
+  const [isOpen, toggle] = useToggle(false)
+
+  return (
+    <DropdownContext.Provider value={{ isOpen, toggle }}>
+      <div className={containerStyle}>{children}</div>
+    </DropdownContext.Provider>
+  )
+}
+
+Dropdown.Trigger = Trigger
+Dropdown.Menu = Menu
+Dropdown.Item = Item
+
+export default Dropdown
+```
+
+드롭다운의 경우 위와 같이 정의할 수 있다. 드롭다운 컴포넌트가 공유하는 상태를 컨텍스트로 관리하고, 컨텍스트 스코프 아래 드롭다운과 그의 하위 요소들을 포함시키는 꼴이다.
+실제로 드롭다운을 사용할 때는 다음과 같은 모양으로 나온다.
+
+```tsx
+<Dropdown>
+	<Dropdown.Trigger>
+	<Dropdown.Menu>
+		{options.map(option => (
+			<Dropdown.Item>{option}</Dropdown.Item>
+		))}
+	</Dropdown.Menu>
+</Dropdown>
+```
+
+### Modal에 컴파운드 패턴 적용
+
+내가 분류한 모달을 컴파운드 패턴을 적용한다고 상상했을 때 나오는 그림은 다음과 같다.
+
+1. Confirm 모달
+
+```tsx
+<Modal isOpen={isOpen}>
+	<Modal.Message>비밀번호가 일치하지 않습니다.</Modal.Message>
+	<Modal.Close>확인</Modal.Close>
+</Modal>
+```
+
+2. Alert 모달
+
+```tsx
+<Modal isOpen={isOpen}>
+  <Modal.Message>정말 삭제하시겠습니까?</Modal.Message>
+  <div>
+    <Modal.Close>취소</Modal.Close>
+    <Modal.Button>삭제</Modal.Button>
+  </div>
+</Modal>
+```
+
+3. Form 모달
+
+```tsx
+<Modal isOpen={isOpen}>
+	<Form>
+		<Form.Field>
+			<Form.Input />
+		</Form.Field>
+		<Form.Submit>등록</Form.Submit>
+	</Modal.Form>
+</Modal>
+```
+
+이렇게 쓸 경우 확실히 용도에 따라 다른 스타일링 속성을 갖는 모달 컴포넌트 내부에서 분기처리를 할 필요 없이, 외부에서 스타일링을 자유롭게 지정할 수 있다는 유연함이 있다. 모달 컴포넌트를 외부에서 결정하기 때문에 기능이 달라져도 유연한 변경으로 모달 컴포넌트의 재사용성이 보장되는 장점도 있다.
+
+하지만, 실제로 프로젝트에 적용을 하려고 만들다 보니 이 방법의 단점들을 발견했다.
+
+1. 모달 안의 컨텐츠들을 사실 모달과 종속적인 관계가 없다.
+   모달은 그저 바탕을 어둡게 하고, 가운데에 위치한 하얀 둥근 컨테이너일 뿐이지, 안에 있는 컨텐츠가 모달 컴포넌트 내부에서 정의될 필요가 없다.
+2. 모달이 많을 수록, 해당 모달과 관련된 상태가 늘어난다.
+   가령 이 프로젝트의 핵심인 dashboard 페이지에서는 모달이 6~7개가 등장한다. 그럼 해당 페이지에는 모달을 열고 닫는데에만 쓰이는 상태가 그 만큼 필요하다는 뜻이다. 실제로 모달은 한 번에 하나만 등장을 하는데도 불구하고 말이다.
+
+그래서 모달이라는 하얀색 껍데기가 각기 다른 모달마다 따로 가질 필요가 있을까? 라는 질문에 대해 고민을 해봤고, 모달을 컨텐츠와 분리해서 모달에 해당하는 부분만 전역에서 관리하면 어떨까 라는 생각에 이르렀다.
+
+### 모달을 전역에서 관리
+
+![|300](https://i.imgur.com/PxNnXSw.png)
+모달의 역할을 위에서 말했듯이 주변 바탕을 반투명한 까만 색 div로 덮고, 그 중심에 하얀색 배경을 가진 컨테이너로 국한시켰다. 그러면 컨텐츠가 달라도, 전부 하나의 모달을 공유하게 되는 것이니 자원을 더 효율적으로 사용하는 것이기도 하다.
+![|500](https://i.imgur.com/e0E9u9O.png)
+![|500](https://i.imgur.com/1KKgUOt.png)
+
+모달은 껍데기 부분만 남기고, 최상위 layout에 위치시켰다.
+모달을 열고 닫는 상태는 zustand 로 전역에서 관리하고,
+![|500](https://i.imgur.com/qZQzXTs.png)
+openModal 에 컨텐츠만 넘기면 된다.
