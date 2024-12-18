@@ -1,0 +1,145 @@
+---
+title: 트러블 슈팅 - 테일윈드머지 커스텀 클래스 병합 문제
+date: '2024-12-02'
+tags: ['troubleshooting', '개발 경험']
+draft: false
+summary: twMerge 에서는 커스텀 클래스의 경우 병합 규칙에서 예외가 발생할 수 있다. 이를 제대로 처리하기 위해서는 extendTailwindMerge 를 활용하여 병합 규칙을 확장할 수 있다.
+---
+
+## 배경
+
+twMerge 는 tailwind 의 유틸리티 클래스명 중에 같은 속성에 해당하는 클래스명이 여럿 존재하는 경우 일련의 규칙에 따라 하나의 클래스명만 남기는 기능을 제공한다. 보통 상위에서 props 로 전달받는 클래스명이 기존 동일 속성의 클래스명을 override 하는 목적으로 많이 쓰인다.
+
+## 문제상황
+
+![](https://i.imgur.com/0KO4gZG.png)
+
+Chip 컴포넌트 개발 중에 jest 로 단위 테스트를 돌리던 중, props 로 전달내린 클래스명이 적절하게 전달 받는지에 대한 테스트 케이스가 통과하지 못한 사실을 발견했다.
+
+위에서 보이듯이 `text-gray-500` 이라는 클래스명이 제대로 전달 받고있지 않다.
+
+이 문제는 이전 taskify 에서도 경험한 문제였다. 그 원인을 추측컨대, `text-` prefix 를 폰트 사이즈와 텍스트 색상 클래스가 공유하는 가운데 twMerge 가 이 둘이 다른 속성임을 알지 못해 `text-body3` 가 `text-gray-500` 을 덮어씌워버린 것 같다.
+
+## 문제 원인
+
+- [twMerge is removing custom classes wrongly](https://github.com/dcastil/tailwind-merge/issues/276)
+  ![](https://i.imgur.com/XNdEyLM.png)
+
+- [tailwind css custom class passed as props is not overriding the already applied class](https://stackoverflow.com/questions/72887137/tailwind-css-custom-class-passed-as-props-is-not-overriding-the-already-applied)
+  ![](https://i.imgur.com/YqnpzfF.png)
+
+검색 결과 흔히 나타나는 문제인 것 같다.
+알아낸 점은 tailwind.config.ts 에서 새로 클래스명을 확장하지 않은 경우에는 정상적으로 `text-[폰트사이즈]` 와 `test-[text 색상]`이 공존할 수 있으나,
+확장된 커스텀 클래스의 경우 이런 문제가 발생한다는 것이다.
+
+```ts
+// tailwind.config.ts
+const fontPalette: Record<
+  string,
+  [string, { lineHeight: string; letterSpacing: string }] | string
+> = {
+  heading1: ['40px', { lineHeight: '54px', letterSpacing: '-0.02em' }],
+  heading2: ['28px', { lineHeight: '36px', letterSpacing: '-0.02em' }],
+  heading3: ['24px', { lineHeight: '32px', letterSpacing: '-0.02em' }],
+  heading4: ['22px', { lineHeight: '30px', letterSpacing: '-0.02em' }],
+  heading5: ['20px', { lineHeight: '28px', letterSpacing: '-0.02em' }],
+  title1: ['18px', { lineHeight: '26px', letterSpacing: '-0.02em' }],
+  title2: ['16px', { lineHeight: '24px', letterSpacing: '-0.02em' }],
+  body1: ['16px', { lineHeight: '24px', letterSpacing: '-0.02em' }],
+  body2: ['15px', { lineHeight: '22px', letterSpacing: '-0.02em' }],
+  body3: ['14px', { lineHeight: '20px', letterSpacing: '-0.02em' }],
+  caption1: ['13px', { lineHeight: '18px', letterSpacing: '-0.02em' }],
+  caption2: ['12px', { lineHeight: '16px', letterSpacing: '-0.02em' }],
+  inherit: 'inherit',
+}
+```
+
+> 위는 dfd 프로젝트에서 팀원이 설정해준 폰트 크기 관련 커스텀 클래스명이다.
+
+### twMerge 메커니즘
+
+https://github.com/dcastil/tailwind-merge/blob/main/src/lib/merge-configs.ts
+https://github.com/dcastil/tailwind-merge/blob/main/src/lib/default-config.ts
+
+```ts
+twMerge('p-4 p-2 text-lg text-sm')
+```
+
+twMerge 가 제공하는 기능은 단순하다.
+
+1. 클래스명을 파싱하고 `['p-4', 'p-2', 'text-lg', 'text-sm']'`
+2. tailwind css 클래스 그룹화 규칙을 따라 같은 그룹의 클래스명을 비교한다.
+   - p-4 vs p-2
+   - text-lg vs text-sm
+3. 같은 그룹에 속한 클래스가 충돌할 경우, 가장 마지막에 선언된 클래스를 우선적으로 적용한다.
+   - `p-2 text-sm` 우승
+
+```ts
+type DefaultThemeGroupIds = 'blur' | 'borderColor' | 'borderRadius' | 'borderSpacing' | 'borderWidth' | 'brightness' | 'colors' | 'contrast' | 'gap' | 'gradientColorStopPositions' | 'gradientColorStops' | 'grayscale' | 'hueRotate' | 'inset' | 'invert' | 'margin' | 'opacity' | 'padding' | 'saturate' | 'scale' | 'sepia' | 'skew' | 'space' | 'spacing' | 'translate';
+
+type DefaultClassGroupIds = 'accent' | 'align-content' | 'align-items' | 'align-self' | 'animate' | 'appearance' | 'aspect' | 'auto-cols' | 'auto-rows' | 'backdrop-blur' | 'backdrop-brightness' | ... `
+```
+
+> 테마와 클래스 그룹으로 같은 속성의 클래스명인지 구분한다.
+> font-size 와 text-color 도 별개의 그룹으로 구분되어진다.
+
+다만, twMerge 는 기본적으로 tailwind css 의 그룹화 규칙을 따르기 때문에 커스텀 클래스명의 경우 중복 제거 동작 시 예상치 못한 동작을 보일 수 있다.
+
+즉, 기존의 text-heading1 등의 클래스명이 font-size 그룹으로 인정되지 않기 때문에, text-color 그룹의 text-gray-500 을 오버라이드한 것이다.
+
+## 해결
+
+https://happynet-fe.tistory.com/1
+https://github.com/dcastil/tailwind-merge/blob/v2.4.0/docs/configuration.md
+https://github.com/dcastil/tailwind-merge/blob/main/src/lib/extend-tailwind-merge.ts
+
+해결 방안에 대해서도 검색을 해보았다.
+블로그 글에서 소개되는 방식은 커스텀 클래스명을 tailwind 에서 사용중이라면, 기존의 merge-config 에 새로운 규칙을 추가하면 된다.
+
+```ts
+export const twMergeEx = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': [
+        {
+          text: [
+            'heading1',
+            'heading2',
+            'heading3',
+            'heading4',
+            'heading5',
+            'title1',
+            'title2',
+            'body1',
+            'body2',
+            'body3',
+            'caption1',
+            'caption2',
+            'inherit',
+          ],
+        },
+      ],
+    },
+  },
+})
+```
+
+> extendTailwindMerge 메서드를 이용해 새로운 규칙을 확장한 twMergeEx 메서드를 생성할 수 있다.
+
+### 테스트
+
+```ts
+const mergeText = 'text-gray-500 text-heading1'
+
+console.log(`기존 twMerge : ${twMerge(mergeText)}`)
+console.log(`기존 twMergeEx : ${twMergeEx(mergeText)}`)
+```
+
+![](https://i.imgur.com/hDYAfwN.png)
+
+의도한대로 twMergeEx 에서는 같은 `text-` prefix 를 공유하더라도 이 두 클래스명을 다른 그룹으로 처리한다.
+
+## 링크
+
+- https://github.com/DevFDev/frontend/pull/82
+- https://github.com/DevFDev/frontend/pull/133
